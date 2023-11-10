@@ -1,7 +1,7 @@
 # petback
-pembuatan package go untuk tugas chapter05
+pembuatan package go untuk tugas GIS chapter 01-akhir
 
-
+```
 go get -u all
 go mod tidy
 git tag                                 #check current version
