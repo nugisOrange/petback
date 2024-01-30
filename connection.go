@@ -1,15 +1,15 @@
 package petback
 
 import (
-	"os"
 	"context"
-
+	"fmt"
 	"github.com/aiteung/atdb"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"os"
 )
 
-func GetConnectionMongo(MongoString, dbname string) *mongo.Database {
+func MongoCreateConnection(MongoString, dbname string) *mongo.Database {
 	MongoInfo := atdb.DBInfo{
 		DBString: os.Getenv(MongoString),
 		DBName:   dbname,
@@ -18,46 +18,42 @@ func GetConnectionMongo(MongoString, dbname string) *mongo.Database {
 	return conn
 }
 
-func GetAllData(MongoConnect *mongo.Database, colname string) []GeoJson {
-	data := atdb.GetAllDoc[[]GeoJson](MongoConnect, colname)
+func InsertOneDoc(db *mongo.Database, collection string, doc interface{}) (insertedID interface{}) {
+	insertResult, err := db.Collection(collection).InsertOne(context.TODO(), doc)
+	if err != nil {
+		fmt.Printf("InsertOneDoc: %v\n", err)
+	}
+	return insertResult.InsertedID
+}
+
+func GetAllUser(MongoConn *mongo.Database, colname string) []User {
+	data := atdb.GetAllDoc[[]User](MongoConn, colname)
 	return data
 }
 
-func InsertDatajson(MongoConn *mongo.Database, colname string, coordinate []float64, name, volume, tipe string) (InsertedID interface{}) {
-	req := new(LonLatProperties)
-	req.Type = tipe
-	req.Coordinates = coordinate
-	req.Name = name
-	req.Volume = volume
-
-	ins := atdb.InsertOneDoc(MongoConn, colname, req)
-	return ins
+func GetOneUser(MongoConn *mongo.Database, colname string, userdata User) User {
+	filter := bson.M{"username": userdata.Username}
+	data := atdb.GetOneDoc[User](MongoConn, colname, filter)
+	return data
 }
 
-func UpdateDatajson(MongoConn *mongo.Database, colname, name, newVolume, newTipe string) error {
-    filter := bson.M{"name": name}
-
-
-    update := bson.M{
-        "$set": bson.M{
-            "volume": newVolume,
-            "tipe":   newTipe,
-        },
-    }
-
-    _, err := MongoConn.Collection(colname).UpdateOne(context.TODO(), filter, update)
-    if err != nil {
-        return err
-    }
-
-    return nil
+func PasswordValidator(MongoConn *mongo.Database, colname string, userdata User) bool {
+	filter := bson.M{"username": userdata.Username}
+	data := atdb.GetOneDoc[User](MongoConn, colname, filter)
+	hashChecker := CompareHashPass(userdata.Password, data.Password)
+	return hashChecker
 }
 
-func DeleteDatajson(MongoConn *mongo.Database, colname string, name string) (*mongo.DeleteResult, error) {
-    filter := bson.M{"name": name}
-    del, err := MongoConn.Collection(colname).DeleteOne(context.TODO(), filter)
-    if err != nil {
-        return nil, err
-    }
-    return del, nil
+func InsertUserdata(MongoConn *mongo.Database, val User) (InsertedID interface{}) {
+	return InsertOneDoc(MongoConn, "user", val)
+}
+
+func CompareUsername(MongoConn *mongo.Database, Colname, username string) bool {
+	filter := bson.M{"username": username}
+	err := atdb.GetOneDoc[User](MongoConn, Colname, filter)
+	users := err.Username
+	if users == "" {
+		return false
+	}
+	return true
 }

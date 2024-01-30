@@ -1,83 +1,105 @@
 package petback
 
 import (
-	"encoding/json"
-	"fmt"
+	jsondiq "encoding/json"
+	"github.com/whatsauth/watoken"
 	"net/http"
-	"strconv"
+	"os"
 )
-
-func GCHandlerFunc(Mongostring, dbname, colname string) string {
-	koneksyen := GetConnectionMongo(Mongostring, dbname)
-	datageo := GetAllData(koneksyen, colname)
-
-	jsoncihuy, _ := json.Marshal(datageo)
-
-	return string(jsoncihuy)
-}
-
-func GCFPostCoordinate(Mongostring, dbname, colname string, r *http.Request) string {
-	req := new(Credents)
-	conn := GetConnectionMongo(Mongostring, dbname)
-	resp := new(LonLatProperties)
-	err := json.NewDecoder(r.Body).Decode(&resp)
+//<---Function untuk ambil data lewat gcf--->
+func GetDataUserFromGCF(PublicKey, MongoEnv, dbname, colname string, r *http.Request) string {
+	req := new(ResponseDataUser)
+	conn := MongoCreateConnection(MongoEnv, dbname)
+	cihuy := new(Response)
+	err := jsondiq.NewDecoder(r.Body).Decode(&cihuy)
 	if err != nil {
-		req.Status = strconv.Itoa(http.StatusNotFound)
+		req.Status = false
 		req.Message = "error parsing application/json: " + err.Error()
 	} else {
-		req.Status = strconv.Itoa(http.StatusOK)
-		Ins := InsertDatajson(conn, colname,
-			resp.Coordinates,
-			resp.Name,
-			resp.Volume,
-			resp.Type)
-		req.Message = fmt.Sprintf("%v:%v", "Berhasil Input data", Ins)
+		checktoken := watoken.DecodeGetId(os.Getenv(PublicKey), cihuy.Token)
+		compared := CompareUsername(conn, colname, checktoken)
+		if compared != true {
+			req.Status = false
+			req.Message = "Data Username tidak ada di database"
+		} else {
+			datauser := GetAllUser(conn, colname)
+			req.Status = true
+			req.Message = "data User berhasil diambil"
+			req.Data = datauser
+		}
 	}
 	return ReturnStringStruct(req)
 }
 
 func ReturnStringStruct(Data any) string {
-	jsonee, _ := json.Marshal(Data)
-	return string(jsonee)
+	json, _ := jsondiq.Marshal(Data)
+	return string(json)
 }
 
-func GCFUpdateNameGeojson(Mongostring, dbname, colname string, r *http.Request) string {
-	req := new(Credents)
-	resp := new(LonLatProperties)
-	conn := GetConnectionMongo(Mongostring, dbname)
-	err := json.NewDecoder(r.Body).Decode(&resp)
+//<---Function untuk token--->
+func GCFPasetoTokenStr(PrivateKey, MongoEnv, dbname, collectionname string, r *http.Request) string {
+	var resp Credential
+	resp.Status = false
+	mconn := MongoCreateConnection(MongoEnv, dbname)
+	var datauser User
+	err := jsondiq.NewDecoder(r.Body).Decode(&datauser)
 	if err != nil {
-		req.Status = strconv.Itoa(http.StatusNotFound)
-		req.Message = "error parsing application/json: " + err.Error()
+		resp.Message = "error parsing application/json: " + err.Error()
 	} else {
-		req.Status = strconv.Itoa(http.StatusOK)
-		Ins := UpdateDatajson(conn, colname,
-			resp.Name,
-			resp.Volume,
-			resp.Type)
-		req.Message = fmt.Sprintf("%v:%v", "Berhasil Update data", Ins)
+		if PasswordValidator(mconn, collectionname, datauser) {
+			resp.Status = true
+			tokenstring, err := watoken.Encode(datauser.Username, os.Getenv(PrivateKey))
+			if err != nil {
+				resp.Message = "Gagal Encode Token : " + err.Error()
+			} else {
+				resp.Message = "Selamat Datang"
+				resp.Token = tokenstring
+			}
+		} else {
+			resp.Message = "Password Salah"
+		}
 	}
-	return ReturnStringStruct(req)
+
+	return ReturnStringStruct(resp)
 }
 
-func GCFDeleteDataGeojson(Mongostring, dbname, colname string, r *http.Request) string {
-    req := new(Credents)
-    resp := new(LonLatProperties)
-    conn := GetConnectionMongo(Mongostring, dbname)
-    err := json.NewDecoder(r.Body).Decode(&resp)
-    if err != nil {
-        req.Status = strconv.Itoa(http.StatusNotFound)
-        req.Message = "error parsing application/json: " + err.Error()
-    } else {
-        req.Status = strconv.Itoa(http.StatusOK)
-        delResult, delErr := DeleteDatajson(conn, colname, resp.Name)
-        if delErr != nil {
-            req.Status = strconv.Itoa(http.StatusInternalServerError)
-            req.Message = "error deleting data: " + delErr.Error()
-        } else {
-            req.Message = fmt.Sprintf("Berhasil menghapus data. Jumlah data terhapus: %v", delResult.DeletedCount)
-        }
-    }
-    return ReturnStringStruct(req)
+func GCFPasswordHasher(r *http.Request) string {
+	resp := new(Credential)
+	userdata := new(User)
+	resp.Status = false
+	err := jsondiq.NewDecoder(r.Body).Decode(&userdata)
+	if err != nil {
+		resp.Message = "error parsing application/json: " + err.Error()
+	} else {
+		passwordhash, err := HashPass(userdata.Password)
+		if err != nil {
+			resp.Message = "Gagal Hash Passwordnya : " + err.Error()
+		} else {
+			resp.Status = true
+			resp.Message = "Berhasil Hash Password"
+			resp.Token = passwordhash
+		}
+	}
+	return ReturnStringStruct(resp)
 }
 
+func InsertDataUserGCF(Mongoenv, dbname string, r *http.Request) string {
+	resp := new(Credential)
+	userdata := new(User)
+	resp.Status = false
+	conn := MongoCreateConnection(Mongoenv, dbname)
+	err := jsondiq.NewDecoder(r.Body).Decode(&userdata)
+	if err != nil {
+		resp.Message = "error parsing application/json: " + err.Error()
+	} else {
+		resp.Status = true
+		hash, err := HashPass(userdata.Password)
+		if err != nil {
+			resp.Message = "Gagal Hash Password" + err.Error()
+		}
+		userdata.Password = hash
+		InsertUserdata(conn, *userdata)
+		resp.Message = "Berhasil Input data"
+	}
+	return ReturnStringStruct(resp)
+}
