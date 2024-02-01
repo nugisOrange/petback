@@ -69,9 +69,18 @@ func TestInsertUserdata(t *testing.T) {
     conn := MongoCreateConnection("Mongostring", "nugisorange")
     password, err := HashPass("faisalTampan")
     fmt.Println("err", err)
-	data := InsertUserdata(conn, "FaisalAsh", "admin", password)
-	fmt.Println(data)
+    
+    // Create a User instance with the required fields
+    userData := User{
+        Username: "FaisalAsh",
+        Role:     "admin",
+        Password: password,
+    }
+
+    data := InsertUserdata(conn, userData)
+    fmt.Println(data)
 }
+
 
 func TestDecodeToken(t *testing.T) {
 	deco := watoken.DecodeGetId("public",
